@@ -287,7 +287,7 @@ class VideoEditorViewModel : ViewModel() {
 
         viewModelScope.launch {
         val outPutDir = File(
-            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "MergingVideos"
         )
 

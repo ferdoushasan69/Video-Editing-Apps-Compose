@@ -39,3 +39,9 @@ Jetpack Compose – Declarative UI with adaptive layout support
 
 🌗 Dark mode
 
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/93cc0f68-7051-4d62-82ac-6e7c92e918c9" width="40%" />
+</p>
+
+

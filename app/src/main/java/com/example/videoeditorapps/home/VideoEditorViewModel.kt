@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import com.arthenica.mobileffmpeg.Config
 import com.arthenica.mobileffmpeg.Config.RETURN_CODE_CANCEL
@@ -25,10 +26,13 @@ import com.arthenica.mobileffmpeg.LogCallback
 import com.arthenica.mobileffmpeg.LogMessage
 import com.arthenica.mobileffmpeg.Statistics
 import com.arthenica.mobileffmpeg.StatisticsCallback
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -111,7 +115,13 @@ class VideoEditorViewModel : ViewModel() {
         _textValue.value = ""
     }
 
-    fun trimVideo(
+    fun cancelAllTask(){
+        _isMerging.value = false
+        _isCropping.value=false
+        _isCompressing.value  =false
+        _isCutting.value = false
+    }
+    suspend fun trimVideo(
         startMs: Int,
         endMs: Int,
         fileName: String,
@@ -120,12 +130,13 @@ class VideoEditorViewModel : ViewModel() {
         onSuccess: (File) -> Unit
     ): File? {
         _isCutting.value = true
+
         val trimDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "TrimVideo"
         )
-
         if (!trimDir.exists()) trimDir.mkdir()
+
         val fileNameClean = if (fileName.isNotBlank()) {
             fileName.replace(".mp4", "", ignoreCase = true)
         } else {
@@ -134,6 +145,18 @@ class VideoEditorViewModel : ViewModel() {
 
         val dest = File(trimDir, "${fileNameClean}.mp4")
         val originalPath = getRealFromUri(context, uri = uri)
+
+        if (!File(originalPath).exists() || originalPath.isBlank()) {
+            Toast.makeText(context, "Original video file not found!", Toast.LENGTH_SHORT).show()
+            _isCutting.value = false
+            return null
+        }
+
+        if (endMs <= startMs) {
+            Toast.makeText(context, "Invalid trim range", Toast.LENGTH_SHORT).show()
+            _isCutting.value = false
+            return null
+        }
 
         val command = arrayOf(
             "-y",
@@ -150,43 +173,41 @@ class VideoEditorViewModel : ViewModel() {
             "-preset",
             "ultrafast",
             "-crf",
-            "23",            // Optional: quality control (lower is better quality, 18–28 range)
+            "23",
             "-c:a",
             "aac",
             "-b:a",
             "128k",
             dest.absolutePath
         )
-        Log.d("FFmpeg", "Original video path: $originalPath")
 
-        if (!File(originalPath).exists() || originalPath.isBlank()) {
-            Toast.makeText(context, "Original video file not found!", Toast.LENGTH_SHORT).show()
-            return null
+        // Here you need to suspend the coroutine until FFmpeg finishes.
+        // Unfortunately, FFmpeg's executeAsync is callback-based, so you must use suspendCoroutine.
+
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+
+            executeFfmpegBinary(
+                command,
+                context = context,
+                outputFile = dest,
+                onSuccess = {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(dest.absolutePath),
+                        arrayOf("video/mp4"),
+                        null
+                    )
+                    _isCutting.value = false
+                    onSuccess(dest)
+                    cont.resume(dest) {}
+                },
+                onFailure = {
+                    Toast.makeText(context, "Trim failed: $it", Toast.LENGTH_SHORT).show()
+                    _isCutting.value = false
+                    cont.resume(null) {}
+                }
+            )
         }
-        if (endMs <= startMs) {
-            Toast.makeText(context, "Invalid trim range", Toast.LENGTH_SHORT).show()
-            return null
-        }
-        executeFfmpegBinary(
-            command,
-            context = context,
-            outputFile = trimDir,
-            onSuccess = {
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(dest.absolutePath),
-                    arrayOf("video/mp4"),
-                    null
-                )
-                _isCutting.value = false
-                onSuccess(dest)
-            },
-            onFailure = {
-                Toast.makeText(context, "Trim failed: $it", Toast.LENGTH_SHORT).show()
-            }
-        )
-        Toast.makeText(context, "Video Trimmed Success", Toast.LENGTH_SHORT).show()
-        return dest
     }
 
 
@@ -195,64 +216,65 @@ class VideoEditorViewModel : ViewModel() {
         onSuccess: (File) -> Unit
     ) {
         _isCompressing.value = true
-        val videosDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "CompressVideos"
-        )
+      viewModelScope.launch {
+          val videosDir = File(
+              Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+              "CompressVideos"
+          )
 
-        if (!videosDir.exists()) videosDir.mkdirs()
-        val originalFileName =
-            getFileNameFromUri(context, uri)?.substringBeforeLast(".") ?: "compress"
-//        val fileName = "compress_file"
-        val fileExt = ".mp4"
+          if (!videosDir.exists()) videosDir.mkdirs()
+          val originalFileName =
+              getFileNameFromUri(context, uri)?.substringBeforeLast(".") ?: "compress"
+          val fileExt = ".mp4"
 
-        val inputPath = getRealFromUri(context = context, uri = uri)
-        val dest = File(videosDir, originalFileName + fileExt)
+          val inputPath = getRealFromUri(context = context, uri = uri)
+          val dest = File(videosDir, originalFileName + fileExt)
 
-        if (!File(inputPath).exists()) {
-            Log.e("Compress", "compressVideo: Input path is not exits on file path")
-            return
-        }
-        val command = arrayOf(
-            "-y",
-            "-i",
-            inputPath,
-            "-s",
-            "160x120",
-            "-r",
-            "25",
-            "-vcodec",
-            "mpeg4",
-            "-b:v",
-            "150k",
-            "-b:a",
-            "48000",
-            "-ac",
-            "2",
-            "-ar",
-            "22050",
-            dest.absolutePath
-        )
+          if (!File(inputPath).exists()) {
+              Log.e("Compress", "compressVideo: Input path is not exits on file path")
+              return@launch
+          }
+          val command = arrayOf(
+              "-y",
+              "-i",
+              inputPath,
+              "-s",
+              "160x120",
+              "-r",
+              "25",
+              "-vcodec",
+              "mpeg4",
+              "-b:v",
+              "150k",
+              "-b:a",
+              "48000",
+              "-ac",
+              "2",
+              "-ar",
+              "22050",
+              dest.absolutePath
+          )
 
-        executeFfmpegBinary(
-            command = command,
-            context = context,
-            outputFile = dest,
-            onSuccess = { file ->
-                Log.d("Compress", "compressVideo: Success -$file")
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(dest.absolutePath),
-                    null,
-                    null
-                )
-                _isCompressing.value = false
-                onSuccess(file)
-            },
-            onFailure = {
-                Log.e("Compress", "compressVideo: Failed - $it")
-            }
-        )
+          executeFfmpegBinary(
+              command = command,
+              context = context,
+              outputFile = dest,
+              onSuccess = { file ->
+                  Log.d("Compress", "compressVideo: Success -$file")
+                  MediaScannerConnection.scanFile(
+                      context,
+                      arrayOf(dest.absolutePath),
+                      null,
+                      null
+                  )
+                  _isCompressing.value = false
+                  onSuccess(file)
+              },
+              onFailure = {
+                  Log.e("Compress", "compressVideo: Failed - $it")
+              }
+          )
+      }
     }
 
     fun mergingVideo(
@@ -262,8 +284,10 @@ class VideoEditorViewModel : ViewModel() {
         onSuccess: (File) -> Unit
     ) {
         _isMerging.value = true
+
+        viewModelScope.launch {
         val outPutDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
             "MergingVideos"
         )
 
@@ -279,16 +303,16 @@ class VideoEditorViewModel : ViewModel() {
         val command = arrayOf(
             "-i", videoPath,
             "-i", audioPath,
-            "-c:v", "libx264",
+            "-c:v", "copy",
             "-c:a", "aac",
+            "-map","0:v:0",
+            "-map","1:a:0",
             "-pix_fmt", "yuv420p",
             "-shortest",
+            "-y",
             dest.absolutePath
         )
 
-//        val command = arrayOf(
-//            "-i",videoPath,"-i",audioPath, "-c:v", "copy", "-c:a", "aac","-shortest", dest.absolutePath
-//        )
         executeFfmpegBinary(
             command = command,
             context = context,
@@ -305,9 +329,11 @@ class VideoEditorViewModel : ViewModel() {
                 onSuccess(file)
             },
             onFailure = {
-                Log.e(TAG, "mergingVideo: Failed $it")
+                Log.e("Merge", "mergingVideo: Failed $it")
+                _isMerging.value = false
             }
         )
+        }
 
     }
 
@@ -323,6 +349,7 @@ class VideoEditorViewModel : ViewModel() {
         context: Context
     ) {
         _isCropping.value = true
+        viewModelScope.launch {
         val outPutDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "CropVideos"
@@ -333,11 +360,12 @@ class VideoEditorViewModel : ViewModel() {
         val fileName = fileName
         val fileExt = ".mp4"
         val outPutFile = File(outPutDir, fileName + fileExt)
+
         val inputPath = getRealFromUri(context, uri)
 
         if (!File(inputPath).exists()) {
             Log.e(TAG, "cropVideo: Input path is not exits on file path ")
-            return
+            return@launch
         }
         val command = arrayOf(
             "-y",
@@ -368,12 +396,13 @@ class VideoEditorViewModel : ViewModel() {
             }
         )
 
+        }
     }
 
 
     @SuppressLint("Recycle")
-    fun getRealFromUri(context: Context, uri: Uri): String {
-        return try {
+    suspend fun getRealFromUri(context: Context, uri: Uri): String = withContext(Dispatchers.IO){
+        return@withContext try {
             val inputStream = context.contentResolver.openInputStream(uri)
             val file = File(context.cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
 
@@ -385,7 +414,7 @@ class VideoEditorViewModel : ViewModel() {
 
         } catch (e: Exception) {
             e.printStackTrace()
-            return ""
+            return@withContext ""
         }
     }
 

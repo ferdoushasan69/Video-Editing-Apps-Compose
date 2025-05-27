@@ -15,6 +15,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,15 +24,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,18 +48,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.videoeditorapps.home.component.VideoControls
 import com.example.videoeditorapps.home.component.VideoPlayerAndInfo
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import kotlinx.coroutines.launch
 
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
@@ -78,7 +91,7 @@ fun HomeScreen(
     var isCroppingLoading = viewModel.isCropping.collectAsState()
     var audioUri by remember { mutableStateOf<Uri?>(null) }
     var mergedAudio by remember { mutableStateOf<Uri?>(null) }
-    val isMerging by viewModel.isMerging.collectAsState()
+    var isMerging = viewModel.isMerging.collectAsState()
 
 
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -123,35 +136,9 @@ fun HomeScreen(
 
     var cutTextValue by remember { mutableStateOf("") }
 
-    if (isMerging){
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 50.dp)
-        )
-    }
+    val scope = rememberCoroutineScope()
 
-    if (isCompress.value) {
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 50.dp)
-        )
-    }
-    if (isCutting.value) {
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 50.dp)
-        )
-    }
-    if (isCroppingLoading.value) {
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 50.dp)
-        )
-    }
+
 
     if (showAlertDialog) {
         AlertDialog(
@@ -189,6 +176,8 @@ fun HomeScreen(
                                 val startMs = (sliderRange.start * 1000).toInt()
                                 val endMs = (sliderRange.endInclusive * 1000).toInt()
                                 val fileName = cutTextValue
+                                scope.launch {
+
                                 viewModel.trimVideo(
                                     startMs = startMs,
                                     endMs = endMs,
@@ -200,6 +189,7 @@ fun HomeScreen(
                                         viewModel.onVideoPicked(trimmedVideoUri ?: "".toUri())
                                     }
                                 )
+                                }
                             } ?: Toast.makeText(
                                 context,
                                 "Please upload a video first",
@@ -324,8 +314,51 @@ fun HomeScreen(
     }
     val windowSize = rememberWindowSize()
 
+    val bottomSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
+    val showBottomSheet = isMerging.value || isCompress.value || isCutting.value || isCroppingLoading.value
 
-    Scaffold{
+    if (showBottomSheet){
+        ModalBottomSheet(
+            onDismissRequest = {
+                viewModel.cancelAllTask()
+            },
+            sheetState = bottomSheetState,
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        ) {
+            if (isMerging.value) {
+                Progress(
+                    modifier = Modifier,
+                    text = "Merging video please wait..."
+                )
+            }
+
+            if (isCompress.value) {
+                Progress(
+                    modifier = Modifier,
+                    text = "compressing Video please wait..."
+                )
+            }
+            if (isCutting.value) {
+                Progress(
+                    modifier = Modifier,
+                    text = "Cutting video please wait..."
+                )
+            }
+            if (isCroppingLoading.value) {
+                Progress(
+                    modifier = Modifier,
+                    text = "Cropping video please wait..."
+                )
+            }
+        }
+
+    }
+
+    Scaffold(
+
+    ){
 
 
             if (windowSize.width >= WindowType.EXPANDED) {
@@ -616,7 +649,19 @@ fun CustomDialogContent(
 }
 
 
+@Composable
+fun Progress(modifier: Modifier = Modifier,text : String) {
+   Column(
+       modifier = Modifier.fillMaxWidth(),
+       horizontalAlignment = Alignment.CenterHorizontally,
+       verticalArrangement = Arrangement.Center) {
+       CircularProgressIndicator(
+           modifier = Modifier
+       )
+       Spacer(Modifier.height(8.dp))
+       Text(text = text, fontSize = 14.sp)
+       Spacer(Modifier.height(8.dp))
 
-
-
-
+   }
+    
+}

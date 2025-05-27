@@ -37,8 +37,7 @@ import java.io.File
 import java.io.FileOutputStream
 
 class VideoEditorViewModel : ViewModel() {
-    private val _trimStatus = MutableStateFlow<String?>(null)
-    val trimStatus: StateFlow<String?> = _trimStatus.asStateFlow()
+
     private val _selectedVideoUri = MutableStateFlow<Uri?>(null)
     val selectedVideoUri = _selectedVideoUri.asStateFlow()
 
@@ -81,10 +80,6 @@ class VideoEditorViewModel : ViewModel() {
     }
 
 
-    fun setCroppedImageUri(uri: Uri?) {
-        _croppedImageUri.value = uri
-    }
-
     fun onVideoPicked(uri: Uri) {
         _selectedVideoUri.value = uri
     }
@@ -100,10 +95,6 @@ class VideoEditorViewModel : ViewModel() {
             _sliderRange.value = 0f..durationSeconds
             _durationText.value = formatDuration(durationMs)
         }
-    }
-
-    fun onTextValueChange(text: String) {
-        _textValue.value = text
     }
 
 
@@ -181,8 +172,6 @@ class VideoEditorViewModel : ViewModel() {
             dest.absolutePath
         )
 
-        // Here you need to suspend the coroutine until FFmpeg finishes.
-        // Unfortunately, FFmpeg's executeAsync is callback-based, so you must use suspendCoroutine.
 
         return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
 
@@ -547,18 +536,4 @@ class VideoEditorViewModel : ViewModel() {
 
     }
 
-    @SuppressLint("Recycle")
-    fun getRealPathFromUri(context: Context, uri: Uri): String?{
-        val contentResolver = context.contentResolver
-        val projection = arrayOf(MediaStore.Audio.Media.DATA)
-        val cursor = contentResolver.query(uri,projection,null,null,null)
-
-        cursor?.use {
-            if (it.moveToFirst()){
-                val nameIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                return it.getString(nameIndex)
-            }
-        }
-        return null
-    }
 }

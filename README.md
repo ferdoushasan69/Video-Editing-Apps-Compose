@@ -17,7 +17,7 @@ A modern, responsive video editing app built with Jetpack Compose, ExoPlayer, FF
 🧱 Tech Stack
 Jetpack Compose – Declarative UI with adaptive layout support
 
--ExoPlayer – Video playback engine
+--ExoPlayer – Video playback engine
 
 -FFmpeg – Command-line powered video processing
 
